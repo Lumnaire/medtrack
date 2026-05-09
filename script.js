@@ -36,6 +36,7 @@ const els = {
   scheduleMedicine: document.querySelector("#scheduleMedicine"),
   addScheduleButton: document.querySelector("#addScheduleButton"),
   timelineList: document.querySelector("#timelineList"),
+  dayStatus: document.querySelector("#dayStatus"),
   reportTableBody: document.querySelector("#reportTableBody"),
   reportDate: document.querySelector("#reportDate"),
   reportTotal: document.querySelector("#reportTotal"),
@@ -154,6 +155,7 @@ function switchTab(tabName) {
   if (tabName === "schedule") {
     renderCalendar();
     renderTimeline();
+    renderDayStatus();
   } else if (tabName === "report") {
     renderReport();
   }
@@ -169,6 +171,7 @@ function render() {
   if (state.activeTab === "schedule") {
     renderCalendar();
     renderTimeline();
+    renderDayStatus();
   } else if (state.activeTab === "report") {
     renderReport();
   }
@@ -252,7 +255,7 @@ function renderMedicationSelect() {
     .forEach((medication) => {
       const option = document.createElement("option");
       option.value = medication.id;
-      option.textContent = medication.name;
+      option.textContent = `${medication.name} (Stock: ${medication.stock})`;
       els.scheduleMedicine.append(option);
     });
 
@@ -268,9 +271,20 @@ function renderCalendar() {
     state.visibleMonth,
     1 - monthStart.getDay(),
   );
-  const datesWithEvents = new Set(
-    state.schedules.map((schedule) => schedule.date),
-  );
+
+  // Create a map of dates to their completion status
+  const dateStatusMap = new Map();
+  state.schedules.forEach((schedule) => {
+    if (!dateStatusMap.has(schedule.date)) {
+      dateStatusMap.set(schedule.date, {
+        hasEvents: true,
+        allTaken: schedule.taken === true,
+      });
+    } else {
+      const status = dateStatusMap.get(schedule.date);
+      status.allTaken = status.allTaken && schedule.taken === true;
+    }
+  });
 
   els.calendarLabel.textContent = monthStart.toLocaleDateString(undefined, {
     month: "long",
@@ -298,10 +312,42 @@ function renderCalendar() {
 
     button.classList.toggle("is-muted", date.getMonth() !== state.visibleMonth);
     button.classList.toggle("is-selected", dateKey === state.selectedDate);
-    button.classList.toggle("has-event", datesWithEvents.has(dateKey));
+
+    const dateStatus = dateStatusMap.get(dateKey);
+    if (dateStatus) {
+      button.classList.toggle("has-event", dateStatus.hasEvents);
+      button.classList.toggle("all-taken", dateStatus.allTaken);
+    }
 
     button.addEventListener("click", () => selectDate(dateKey));
     els.calendarGrid.append(button);
+  }
+}
+
+function renderDayStatus() {
+  if (!els.dayStatus) return;
+
+  const schedulesForDate = state.schedules.filter(
+    (schedule) => schedule.date === state.selectedDate,
+  );
+
+  if (schedulesForDate.length === 0) {
+    els.dayStatus.className = "day-status empty";
+    els.dayStatus.textContent = "No medications scheduled for this day";
+    return;
+  }
+
+  const allTaken = schedulesForDate.every((schedule) => schedule.taken);
+  const takenCount = schedulesForDate.filter(
+    (schedule) => schedule.taken,
+  ).length;
+
+  if (allTaken) {
+    els.dayStatus.className = "day-status completed";
+    els.dayStatus.textContent = `✓ All medications taken for ${formatDate(state.selectedDate)}`;
+  } else {
+    els.dayStatus.className = "day-status in-progress";
+    els.dayStatus.textContent = `⏳ ${takenCount} of ${schedulesForDate.length} doses taken`;
   }
 }
 
@@ -324,17 +370,34 @@ function renderTimeline() {
   schedulesForDate.forEach((schedule) => {
     const medication = getMedication(schedule.medicationId);
     const item = document.createElement("article");
-    item.className = "timeline-card";
-    item.innerHTML = `
-      <div>
-        <strong></strong>
-        <span>${schedule.time} on ${formatDate(schedule.date)}</span>
-      </div>
-      <button class="mini-button danger" type="button" data-schedule-id="${schedule.id}">Delete</button>
-    `;
-    item.querySelector("strong").textContent = medication
+    item.className = `timeline-card${schedule.taken ? " taken" : ""}`;
+
+    const medicationName = medication
       ? medication.name
       : schedule.medicationName;
+    const currentStock = medication ? medication.stock : 0;
+    const canTake = !schedule.taken && medication && medication.stock > 0;
+
+    item.innerHTML = `
+      <div>
+        <strong>${medicationName}</strong>
+        <span>${schedule.time} on ${formatDate(schedule.date)}</span>
+        ${schedule.taken ? '<small style="color: var(--success); font-weight: 600;">✓ Dose taken</small>' : ""}
+        ${!schedule.taken && medication && medication.stock === 0 ? '<small style="color: var(--alert); font-weight: 600;">⚠ Out of stock</small>' : ""}
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button 
+          class="take-dose-button${schedule.taken ? " taken" : ""}" 
+          type="button" 
+          data-schedule-id="${schedule.id}"
+          ${canTake ? "" : "disabled"}
+        >
+          ${schedule.taken ? "✓ Taken" : "Take Dose"}
+        </button>
+        <button class="mini-button danger" type="button" data-delete-schedule="${schedule.id}">Delete</button>
+      </div>
+    `;
+
     els.timelineList.append(item);
   });
 }
@@ -382,6 +445,44 @@ function createEmptyRow(colspan, message) {
   return row;
 }
 
+function takeDose(scheduleId) {
+  const schedule = state.schedules.find((s) => s.id === scheduleId);
+  if (!schedule || schedule.taken) return;
+
+  const medication = getMedication(schedule.medicationId);
+  if (!medication || medication.stock <= 0) {
+    alert(
+      `Cannot take dose: ${medication ? medication.name : "Medication"} is out of stock!`,
+    );
+    return;
+  }
+
+  // Decrement the medication stock
+  medication.stock -= 1;
+
+  // Mark the schedule as taken
+  schedule.taken = true;
+  schedule.takenAt = new Date().toISOString();
+
+  render();
+}
+
+function deleteSchedule(scheduleId) {
+  const schedule = state.schedules.find((s) => s.id === scheduleId);
+  if (!schedule) return;
+
+  // If the dose was already taken, we should restore the inventory
+  if (schedule.taken) {
+    const medication = getMedication(schedule.medicationId);
+    if (medication) {
+      medication.stock += 1;
+    }
+  }
+
+  state.schedules = state.schedules.filter((s) => s.id !== scheduleId);
+  render();
+}
+
 function selectDate(dateKey) {
   const date = fromDateKey(dateKey);
   state.selectedDate = dateKey;
@@ -389,6 +490,7 @@ function selectDate(dateKey) {
   state.visibleMonth = date.getMonth();
   renderCalendar();
   renderTimeline();
+  renderDayStatus();
   saveState();
 }
 
@@ -416,12 +518,20 @@ function deleteMedication(id) {
   const medication = getMedication(id);
   if (!medication) return;
 
-  if (!confirm(`Delete ${medication.name} and its schedules?`)) return;
+  const relatedSchedules = state.schedules.filter((s) => s.medicationId === id);
+  const takenSchedules = relatedSchedules.filter((s) => s.taken);
 
+  if (
+    !confirm(
+      `Delete ${medication.name} and ${relatedSchedules.length} schedule(s)?`,
+    )
+  )
+    return;
+
+  // Remove related schedules and restore stock for taken doses
+  state.schedules = state.schedules.filter((s) => s.medicationId !== id);
   state.medications = state.medications.filter((item) => item.id !== id);
-  state.schedules = state.schedules.filter(
-    (schedule) => schedule.medicationId !== id,
-  );
+
   resetMedicineForm();
   render();
 }
@@ -499,6 +609,7 @@ els.scheduleForm.addEventListener("submit", (event) => {
     medicationName: medication.name,
     date,
     time,
+    taken: false,
     createdAt: new Date().toISOString(),
   });
 
@@ -507,15 +618,23 @@ els.scheduleForm.addEventListener("submit", (event) => {
   renderDashboard();
 });
 
+// Handle both "Take Dose" clicks and "Delete Schedule" clicks in timeline
 els.timelineList.addEventListener("click", (event) => {
-  const deleteButton = event.target.closest("[data-schedule-id]");
-  if (!deleteButton) return;
+  // Handle Take Dose button
+  const takeButton = event.target.closest(".take-dose-button");
+  if (takeButton && takeButton.dataset.scheduleId) {
+    takeDose(takeButton.dataset.scheduleId);
+    return;
+  }
 
-  state.schedules = state.schedules.filter(
-    (schedule) => schedule.id !== deleteButton.dataset.scheduleId,
-  );
-  renderTimeline();
-  renderDashboard();
+  // Handle Delete Schedule button
+  const deleteButton = event.target.closest("[data-delete-schedule]");
+  if (deleteButton) {
+    if (confirm("Delete this scheduled dose?")) {
+      deleteSchedule(deleteButton.dataset.deleteSchedule);
+    }
+    return;
+  }
 });
 
 els.scheduleDate.addEventListener("change", () => {
@@ -530,6 +649,7 @@ els.previousMonthButton.addEventListener("click", () => {
   state.visibleMonth = previous.getMonth();
   renderCalendar();
   renderTimeline();
+  renderDayStatus();
   saveState();
 });
 
@@ -539,6 +659,7 @@ els.nextMonthButton.addEventListener("click", () => {
   state.visibleMonth = next.getMonth();
   renderCalendar();
   renderTimeline();
+  renderDayStatus();
   saveState();
 });
 

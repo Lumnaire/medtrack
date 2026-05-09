@@ -788,3 +788,85 @@ td {
     display: none;
   }
 }
+
+/* Day Status */
+.day-status {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: var(--radius);
+  text-align: center;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.day-status.completed {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid #c6e9d8;
+}
+
+.day-status.in-progress {
+  background: #fef7e0;
+  color: #946800;
+  border: 1px solid #f5e6b8;
+}
+
+.day-status.empty {
+  background: var(--soft-panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+/* Taken dose styling */
+.timeline-card.taken {
+  opacity: 0.7;
+  background: var(--success-bg);
+  border-color: #c6e9d8;
+}
+
+.timeline-card.taken strong {
+  text-decoration: line-through;
+  color: var(--success);
+}
+
+.take-dose-button {
+  background: var(--primary);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.take-dose-button:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.take-dose-button.taken {
+  background: var(--success);
+  cursor: default;
+  opacity: 0.8;
+}
+
+.take-dose-button.taken:hover {
+  transform: none;
+}
+
+/* Calendar day completion indicator */
+.day-cell.all-taken::before {
+  content: "✓";
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  font-size: 0.7rem;
+  color: var(--success);
+  font-weight: 900;
+}
+
+.day-cell.all-taken {
+  background: #f0faf5;
+}
